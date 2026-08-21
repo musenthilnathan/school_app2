@@ -1,0 +1,611 @@
+TAMIL SCHOOL BOOK DISTRIBUTION SYSTEM (TTS_BDS)
+Implementation Design Specification
+Tech Stack: FastAPI, ReactJS, PostgreSQL
+
+1. PROJECT PURPOSE
+This application supports a non-profit Tamil school during a single-day textbook distribution event. The goal is to manage textbook inventory, student registration updates, live check-in, grade-based queues, book handoff, and final finance reconciliation with strong auditability.
+
+The system must be reliable under high-volume, physically distributed operations in a school hall where multiple volunteers and staff work at the same time.
+
+2. CORE BUSINESS OBJECTIVES
+- Track physical book inventory accurately across the school year
+- Handle student roster changes during the live event
+- Prevent incorrect book handouts to the wrong grade or wrong student
+- Support a two-step approval + handoff workflow
+- Maintain audit records for finance and dispute resolution
+- Allow offline-friendly operation when internet connectivity is weak
+
+3. SYSTEM ARCHITECTURE
+3.1 High-Level Components
+- Frontend: ReactJS web application
+- Backend: FastAPI REST API
+- Database: PostgreSQL
+- File import layer: CSV/XLSX student roster upload
+- Authentication: role-based access with Books Team Lead and volunteer roles
+- Real-time update layer: WebSockets or polling for queue synchronization
+
+3.2 Executive Summary
+This system is designed for a single-day, high-pressure textbook distribution event where accurate inventory, student status, and queue handoff must all be synchronized in real time. The design focuses on three core requirements: accurate physical stock tracking, safe student verification, and clear auditability for finance and school leadership.
+
+The workflow is intentionally built around a two-step process: approval at the central desk and confirmation at the grade table. This protects the system from ghost inventory, wrong-table mistakes, and abandoned check-ins while reducing operational errors during the event.
+
+The system also accounts for late roster updates, grade changes, pending swaps, and backorders, which are common real-world issues in a live distribution event. The UI is intentionally optimized for speed, with immediate search filtering and compact default views that help volunteers work quickly without losing critical context.
+
+3.3 Recommended Deployment Pattern
+- Frontend deployed as a static SPA on a web host or Vercel/Netlify-style platform
+- Backend deployed as a FastAPI service in a container or VM
+- PostgreSQL hosted in managed database service or private instance
+- Optional Redis for queue caching, background jobs, and session caching
+
+4. ROLE MODEL
+- Super Admin / Principal
+  - Approves system setup
+  - Oversees event-level controls
+  - Reviews finance reports and unresolved discrepancies
+
+- Books Team Lead
+  - Enters invoice data
+  - Uploads CTA student roster
+  - Manages course inventory and backorders
+  - Reviews and resolves disputes
+
+- Volunteer / Table Staff
+  - Sees only their grade queue
+  - Confirms book handoff
+  - Flags Out of Stock or other operational issues
+
+- Finance Team
+  - Pulls reconciliation reports
+  - Reviews actual vs expected inventory difference
+  - Checks final distribution totals
+
+5. BUSINESS ENTITIES
+5.1 Book Catalog
+Properties:
+- id
+- title
+- publisher_code
+- grade_level
+- base_unit_cost
+- is_active
+- created_at
+- updated_at
+
+5.2 Inventory Record (Academic Year Scoped)
+Properties:
+- id
+- academic_year
+- book_id
+- expected_quantity
+- actual_quantity
+- rollover_stock
+- spare_stock
+- invoice_shipping_cost
+- projected_available_inventory
+- created_at
+- updated_at
+
+5.3 Student Registry
+Properties:
+- id
+- tts_student_id (internal immutable numeric key, unique, system-generated, cannot be reassigned; 0 is reserved and never reused)
+- cta_student_id (external CTA-assigned numeric key, retained as the source-of-truth identifier from CTA)
+- full_name
+- registered_grade_level
+- current_status
+- last_uploaded_batch_id
+- approved_at
+- book_handed_over_at
+- pending_swap_flag
+- is_active
+- created_at
+- updated_at
+
+Possible statuses:
+- READY_FOR_PICKUP
+- APPROVED
+- BOOK_HANDED_OVER
+- WITHDRAWN_INACTIVE
+- PENDING_SWAP
+- BACKORDERED
+- CLAIMED
+
+These statuses capture the student lifecycle from roster sync through final handoff, backorder handling, and settlement.
+
+5.4 Distribution Queue
+Properties:
+- id
+- student_id
+- grade_level
+- queue_status
+- checked_in_at
+- approved_at
+- table_id
+- assigned_volunteer_id
+- handoff_confirmed_at
+- created_at
+- updated_at
+
+5.5 Event Audit Log
+Properties:
+- id
+- entity_type
+- entity_id
+- action_type
+- old_value
+- new_value
+- actor_id
+- actor_role
+- timestamp
+- notes
+
+Examples:
+- student status changed from READY_FOR_PICKUP to APPROVED
+- inventory quantity decremented by 1
+- student flagged as PENDING_SWAP
+
+5.6 Discrepancy / Shortfall Record
+Properties:
+- id
+- book_id
+- expected_quantity
+- actual_quantity
+- discrepancy_quantity
+- discrepancy_type
+- status
+- resolution_note
+- created_at
+- resolved_at
+
+6. DATA RULES AND TRUTH MODEL
+The system must distinguish between the following actual truths:
+- Catalog values: base reference data from the publisher
+- Expected inventory: official ordered quantity from invoice
+- Actual inventory: physically counted stock verified during event
+- Rollover stock: untouched stock carried from prior year
+- Spare stock: older or damaged reserve stock for emergency replacement
+- Student roster: external CTA master data
+
+Rules:
+- CTA student ID remains the external source-of-truth key for roster sync and reconciliation.
+- TTS student ID is the internal fast-search key for day-of-event operations and UI lookup; it is immutable once created.
+- 0 is reserved as an invalid/unassigned sentinel and must never be reused for a real student record.
+- Physical count becomes the operational truth during distribution day
+- Inventory decrements only when handoff is confirmed at the physical grade table
+- Approved status does not decrement inventory until the table volunteer confirms the handout
+
+7. OPERATIONAL WORKFLOW
+7.1 Phase 1: Pre-Event Inventory Ingestion
+1. Books Team Lead enters invoice values from CTA invoice.
+2. System records expected quantities, unit cost, and shipping fee.
+3. Books Team Lead enters start-of-year rollover and spare stock data.
+4. System computes projected available inventory.
+
+7.2 Phase 2: Hall Day Audit Event
+1. School hall is prepared and all boxes are brought in.
+2. Volunteers unpack books and sort by grade and book title.
+3. Volunteers count book stacks and enter actual quantities into the system.
+4. System calculates discrepancy = expected - actual.
+5. If discrepancy exists, the book is flagged as SHORTFALL and a dispute item is created.
+6. The physical count at the table is treated as operational truth.
+
+7.3 Phase 3: Student Registry Sync
+1. Books Team Lead exports active student roster from CTA portal.
+2. Books Team Lead uploads the Excel file to the app.
+3. Upload is repeated approximately every 2 hours.
+
+Sync rules:
+- New Student ID -> READY_FOR_PICKUP
+- Existing Student ID + same grade -> no change
+- Student missing from file -> WITHDRAWN_INACTIVE
+- Existing Student ID + grade changed and not yet picked up -> grade updated immediately
+- Existing Student ID + grade changed and already picked up old book -> PENDING_SWAP and blocked from new book until verified return
+
+7.4 Phase 4: Live Distribution Cycle
+Step 1: Central Check-In Desk
+- Parent gives student ID or name to the Books Team Lead at the desk.
+- App displays student status with color indication:
+  - GREEN: READY_FOR_PICKUP
+  - YELLOW: PENDING_SWAP
+  - RED: CLAIMED
+- If GREEN, the Books Team Lead clicks APPROVE_FOR_PICKUP.
+- Student becomes APPROVED and is placed in grade-specific queue.
+- Inventory is not decremented yet.
+- Parent is told to proceed to the correct grade table.
+
+Step 2: Physical Grade Table
+- Volunteer screen is restricted to the active queue for a single grade.
+- Volunteer asks for student name.
+- Parent identifies student.
+- Volunteer confirms the student and grants the book.
+- System action:
+  - status = BOOK_HANDED_OVER
+  - inventory for that grade decrements by 1
+
+8. ERROR HANDLING AND DEFENSE MECHANISMS
+8.1 Error A: Ghost Inventory Hazard
+Scenario:
+- Student approved for pickup, but physical stock at grade table is empty.
+Defense:
+- Volunteer taps FLAG_OUT_OF_STOCK.
+- Student moves to BACKORDERED.
+- Inventory cannot fall below zero.
+- Books Team Lead dashboards display urgent notice.
+- System triggers spare stock or CTA escalation workflow.
+
+8.2 Error B: Abandoned Check-In Hazard
+Scenario:
+- Student is approved but never reaches the table.
+Defense:
+- Inventory is not decremented at approval step.
+- At the end of the event, the Books Team Lead can reset lingering APPROVED records to READY_FOR_PICKUP.
+
+8.3 Error C: Wrong Table Accident
+Scenario:
+- Grade 3 student appears at Grade 4 table.
+Defense:
+- Grade 4 queue is filtered to grade 4 only.
+- Volunteer cannot find the student on that queue.
+- Volunteer uses global search or redirects to correct table.
+
+9. FINANCE AND REPORTS
+At the conclusion of the event, the system must freeze historical records and provide finance exports.
+
+Reports required:
+- Total expenditure based on audited intake counts versus invoice counts
+- Discrepancy matrix showing missing or overdelivered titles
+- Final distribution rates: books issued vs books remaining in storage
+- Cost summary by grade, title, and total order
+- Replacement and credit demand summary for CTA
+
+10. FUNCTIONAL REQUIREMENTS
+10.1 Inventory Management
+- Record expected, actual, rollover, and spare quantities
+- Recalculate projected available inventory automatically
+- Prevent inventory below zero
+- Track stock movement per handoff
+- Support manual adjustment with audit logs
+
+10.2 Student Management
+- Import student roster from Excel/CSV
+- Map by unique CTA student ID and maintain an internal tts_student_id for fast reference
+- Use tts_student_id for quick search in the volunteer UI and for stable internal references in queue records
+- Update enrollment grade based on latest import
+- Detect withdrawn students
+- Mark pending swap states when necessary
+
+10.3 Distribution Queue
+- Show queue by grade
+- Allow central desk approval
+- Restrict volunteer view to assigned grade queue
+- Record handover confirmation
+- Handle out-of-stock/backorder states
+
+10.4 Audit and Compliance
+- Maintain full event log for all changes
+- Freeze historical data after finalization
+- Provide exportable reports for finance and Books Team Lead review
+
+11. NON-FUNCTIONAL REQUIREMENTS
+- High reliability during peak event usage
+- Fast page load and low-latency API responses
+- Role-based access control
+- Data integrity and proper validation
+- System resilient to duplicate student entries and upload drift
+- Audit trail for every state transition
+- Support for offline or weak network conditions during event operations
+
+12. DATABASE DESIGN (POSTGRESQL)
+12.1 Tables
+- books
+- inventories
+- students
+- student_status_history
+- distribution_queues
+- inventory_movements
+- discrepancies
+- event_audit_logs
+- users
+- roles
+- uploads
+- grade_tables
+- book_handoffs
+
+12.2 Major Table Structure
+books
+- id: UUID primary key
+- title: text
+- publisher_code: text
+- grade_level: integer
+- base_unit_cost: numeric(10,2)
+- is_active: boolean
+- created_at: timestamptz
+- updated_at: timestamptz
+
+inventories
+- id: UUID primary key
+- academic_year: varchar(10)
+- book_id: UUID references books(id)
+- expected_quantity: integer
+- actual_quantity: integer
+- rollover_stock: integer
+- spare_stock: integer
+- invoice_shipping_cost: numeric(10,2)
+- projected_available_inventory: integer
+- created_at: timestamptz
+- updated_at: timestamptz
+
+students
+- id: UUID primary key
+- tts_student_id: bigint unique not null
+- cta_student_id: bigint unique not null
+- full_name: text
+- registered_grade_level: integer
+- current_status: text
+- is_active: boolean
+- pending_swap_flag: boolean
+- last_import_batch_id: UUID
+- created_at: timestamptz
+- updated_at: timestamptz
+
+distribution_queues
+- id: UUID primary key
+- student_id: UUID references students(id)
+- grade_level: integer
+- queue_status: text
+- checked_in_at: timestamptz
+- approved_at: timestamptz
+- handoff_confirmed_at: timestamptz
+- table_id: UUID
+- volunteer_id: UUID
+- created_at: timestamptz
+- updated_at: timestamptz
+
+inventory_movements
+- id: UUID primary key
+- inventory_id: UUID references inventories(id)
+- movement_type: text
+- quantity_change: integer
+- reason: text
+- created_by: UUID
+- created_at: timestamptz
+
+13. API ENDPOINTS (FASTAPI)
+Authentication:
+- POST /api/auth/login
+- POST /api/auth/logout
+
+Inventory:
+- GET /api/inventory
+- POST /api/inventory/import-invoice
+- POST /api/inventory/actual-count
+- GET /api/inventory/{id}/summary
+- POST /api/inventory/{id}/adjust
+
+Students:
+- GET /api/students
+- POST /api/students/import-roster
+- GET /api/students/{student_id}
+- PATCH /api/students/{student_id}/status
+- POST /api/students/{student_id}/approve
+- POST /api/students/{student_id}/flag-backorder
+
+Queue & Distribution:
+- GET /api/queues/{grade_level}
+- POST /api/queues/checkin
+- POST /api/queues/{student_id}/approve-for-pickup
+- POST /api/queues/{student_id}/confirm-handoff
+- POST /api/queues/{student_id}/flag-out-of-stock
+- POST /api/queues/reset-pending-approvals
+
+Reports:
+- GET /api/reports/finance-summary
+- GET /api/reports/discrepancy-matrix
+- GET /api/reports/final-distribution
+- GET /api/reports/audit-log
+
+14. STATE MACHINE DEFINITION
+Student Status State Machine
+- READY_FOR_PICKUP -> APPROVED -> BOOK_HANDED_OVER
+- READY_FOR_PICKUP -> WITHDRAWN_INACTIVE
+- READY_FOR_PICKUP -> PENDING_SWAP
+- APPROVED -> BACKORDERED
+- APPROVED -> BOOK_HANDED_OVER
+- APPROVED -> READY_FOR_PICKUP (reset batch)
+- BOOK_HANDED_OVER -> CLAIMED
+- PENDING_SWAP -> READY_FOR_PICKUP (after return verification)
+
+Inventory State Rules
+- expected_quantity: static from invoice
+- actual_quantity: live physical count
+- projected_available_inventory = (actual_quantity + rollover_stock + spare_stock) - issued_books
+- inventory cannot fall below zero
+
+15. REACTJS FRONTEND MODULES
+- Login screen
+- Dashboard overview
+- Invoice intake form
+- Inventory count form
+- Student roster upload page
+- Central check-in desk page
+- Grade-specific distribution queue page
+- Volunteer handoff page
+- Books Team Lead discrepancy review page
+- Finance reporting page
+- Audit log viewer
+
+15.1 Reactive Student Search UX Requirement
+The volunteer search screens must be highly responsive and optimized for fast line management during the event.
+- Search should trigger on each keystroke with no manual submit button required.
+- Matching should be incremental and case-insensitive across student name and student ID.
+- Example: typing "sen" should immediately narrow the displayed list to only rows containing "sen" in the student name or ID.
+- The result list should refresh within a short delay (for example, under 100ms for local filtered data).
+- Lists should be sorted by relevance, with exact name or ID matches appearing first.
+- The selected row should remain visible when the user is navigating with keyboard arrows.
+- On mobile or tablet devices, the search field should remain visible and sticky at the top of the list.
+- Search should respect the current grade or queue filter to prevent cross-table confusion.
+- If no records match, the UI should show a clear empty-state message with a quick reset option.
+
+This requirement is critical because the volunteer queue is a high-pressure, high-frequency workflow. The user must be able to narrow a long list to the correct student in less than a second without losing attention or disrupting the line.
+
+15.2 Compact Student Record Display Strategy
+Student records contain many fields, but the UI should not show everything at once. The screen must prioritize the data required for rapid operational decisions while keeping additional metadata available in a secondary detail layer.
+
+Default compact view (primary processing view):
+- Student Name
+- Student ID
+- Grade
+- Section
+- Status
+- Action button
+
+Hidden by default (secondary metadata):
+- Parent Name
+- Parent Email
+- Parent Phone
+- Guardian contact details
+- Notes / follow-up comments
+- Last sync timestamp
+- Audit history
+- Books Team Lead notes
+
+UI behavior:
+- Default table view shows only the essential operational columns.
+- A compact column-toggle or settings menu allows user to show or hide secondary fields by role.
+- Volunteer mode should be intentionally minimal to reduce cognitive load and scanning time.
+- Books Team Lead mode should expose additional metadata for review and reconciliation.
+- Extra fields should appear in a side drawer, modal, or expandable row rather than crowding the main queue list.
+- Long text such as email or notes should be truncated with a tooltip or a detail expansion action.
+
+This pattern keeps the queue fast for volunteers while preserving complete student data for Books Team Lead review and escalation.
+
+15.3 Role-Based Views
+- Volunteer view: focus on student identity, grade, section, status, and immediate action.
+- Books Team Lead view: show student status, queue placement, approval actions, and contact lookup if needed.
+- Principal / Books Team Lead view: include detailed audit, historical changes, and discrepancy indicators.
+- Finance view: include the most relevant operational and reconciliation data without exposing unnecessary person-level contact details unless required.
+
+15.4 Keyboard-Driven Lookup Acceptance Criteria
+The quick lookup behavior is a required interaction for all student search and queue screens.
+- On each keypress, the system filters the visible student list immediately without requiring a submit action.
+- Matching is case-insensitive across both full name, CTA student ID, and tts_student_id.
+- Typing "sen" shows only students whose name or ID contains "sen".
+- If tts_student_id is available, it should be prioritized in the lookup order for very fast exact-match lookups during the event.
+- The list updates within 100ms for a locally filtered dataset, and within a practical responsive range for server-backed dataset loads.
+- The search is scoped to the current grade or active queue unless the user explicitly chooses a global search.
+- The first matching result should be highlighted automatically when multiple rows match.
+- Arrow keys and Enter should allow rapid keyboard navigation to the highlighted student.
+- Clearing the field should restore the full queue for that grade or selection.
+- Empty search results must show a clear message such as "No matching students" and a quick Reset button.
+- The search field must remain visible and easy to focus while the user is scanning the queue.
+
+This interaction must feel immediate and effortless because volunteers are working under time pressure and cannot afford slow scanning or manual filtering.
+
+This is a critical workflow requirement because volunteers need to find students rapidly under time pressure without visually scanning long lists.
+
+16. USER EXPERIENCE FLOW
+Check-In Desk UX:
+- Search by student ID or name
+- View student status badge
+- Show high-priority messages
+- Button: APPROVE FOR PICKUP
+- Warning if pending swap or claimed status
+
+Volunteer Queue UX:
+- Filtered queue by grade
+- Show only active names waiting for handoff
+- Buttons: CONFIRM HANDOUT, FLAG OUT OF STOCK, SEARCH
+- Show inventory remaining for grade
+
+17. BACKEND BUSINESS LOGIC REQUIREMENTS
+- Validate duplicate student imports and same-day roster updates
+- Enforce single active queue entry per student per event
+- Lock inventory records during decrement operations
+- Use transaction boundaries to prevent race conditions
+- Record all changes to audit log before committing if possible
+- Use explicit service layer for inventory reconciliation and student sync
+
+18. CONCURRENCY AND DATA INTEGRITY
+Because multiple volunteers and Books Team Leads may operate concurrently, the system must handle:
+- simultaneous inventory decrements
+- duplicate student approval submissions
+- multiple roster uploads during the same event
+- stale data from delayed UI refreshes
+
+Recommended protections:
+- PostgreSQL transactions for inventory decrement and queue update
+- row-level locking or advisory locking for inventory rows
+- optimistic concurrency for UI updates
+- version numbers or updated_at checks on repeated imports
+- event log to support audit and exceptions
+
+19. IMPLEMENTATION PRIORITIES
+Priority 1
+- User auth and roles
+- Book catalog and inventory management
+- Student roster import
+- Student status sync logic
+- Queue and approval flow
+- Handoff confirmation and inventory decrement
+
+Priority 2
+- Audit trail and event logging
+- Discrepancy detection
+- Finance reporting export
+- Backorder and pending swap handling
+
+Priority 3
+- Offline support, sync queue, and retry logic
+- Dashboard polish and Books Team Lead filters
+- Advanced reporting and analytics
+
+20. ACCEPTANCE CRITERIA
+- A Books Team Lead can successfully enter invoice values and stock records.
+- A volunteer can review only their assigned grade queue.
+- The system prevents inventory from going negative.
+- Student roster uploads correctly update student status.
+- Grade change logic handles both pre-pickup and post-pickup scenarios.
+- A backorder event is logged and visible to Books Team Lead staff.
+- Finance output can export final totals and discrepancy summaries.
+
+21. RISKS AND MITIGATIONS
+Risk: Duplicate student record uploads
+Mitigation: use unique student_id and validation checks
+
+Risk: Inventory decrement race conditions
+Mitigation: transactional update and locking
+
+Risk: Connectivity loss during hall event
+Mitigation: offline-safe client and queue-sync strategy
+
+Risk: Wrong-grade handouts
+Mitigation: strict grade-based queue filtering and validation
+
+Risk: Inconsistent student statuses after late roster sync
+Mitigation: event-driven re-evaluation and clear status rules
+
+22. TEAM REVIEW QUESTIONS
+The following questions should be reviewed by the team before engineering begins:
+- Is the two-step approval + handoff flow acceptable for the actual event operations?
+- Should the system support full offline operation for a limited time if internet is unavailable?
+- Are the Books Team Lead and volunteer roles correctly mapped to real staff responsibilities?
+- Is the tts_student_id approach clear and acceptable as the fast lookup key for the UI?
+- Should finance reporting be limited to final frozen data or also accessible during the event in summary form?
+- Are there any school-specific exceptions that require extra statuses beyond the current workflow?
+- Should the queue search allow both exact ID search and partial name search by default?
+
+23. RECOMMENDED NEXT STEPS
+1. Finalize exact school event date and roles
+2. Define database schema in PostgreSQL
+3. Build FastAPI API skeleton with authentication and core services
+4. Build ReactJS pages for desk and volunteer workflow
+5. Simulate event scenarios in test data
+6. Validate audit logs and stock reconciliation
+7. Run finance report validation before event launch
+
+24. FINAL DESIGN VERDICT
+The concept is strong and operationally sound. It is especially effective because it treats the physical distribution process as a real-world state machine, not just a simple record system. The design is well suited for FastAPI + ReactJS + PostgreSQL because it balances transactional correctness, user workflow clarity, and event audit requirements.
+
+This document is ready to serve as the implementation baseline for the application build.
+
+Project naming note: the system name is standardized as TTS_BDS for internal project reference.
