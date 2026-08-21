@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: tts_bds_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tts_bds
+      POSTGRES_USER: tts_user
+      POSTGRES_PASSWORD: tts_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
