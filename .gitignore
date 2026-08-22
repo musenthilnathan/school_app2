@@ -1,0 +1,54 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Environment files
+backend/.env
+frontend/.env
+.env
+.env.local
+
+# Database
+backend/*.db
+*.sqlite
+*.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+sample_upload.csv
+/home/senthil/Downloads/
+*.xls
+*.xlsx
