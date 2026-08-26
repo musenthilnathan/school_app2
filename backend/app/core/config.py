@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     app_name: str = "TTS_BDS"
     prod: bool = False
 
-    database_url_dev: str = "postgresql+psycopg://tts_user:tts_pass@localhost:5432/tts_bds"
+    database_url_dev: str = "postgresql+psycopg://postgres:postgres@localhost:5432/tts_bds"
     secret_key_dev: str = "dev-secret-key-change-me"
 
     database_url_prod: str = ""

@@ -62,7 +62,7 @@ class Student(Base):
     # Student identifiers (per design spec)
     tts_student_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     cta_student_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
-    
+    parent_email: Mapped[str | None] = mapped_column(String(255), nullable=True)  # NEW    
     # Student information
     full_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     school: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -99,10 +99,11 @@ class Student(Base):
             "id": self.id,
             "tts_student_id": self.tts_student_id,
             "cta_student_id": self.cta_student_id,
-            "name": self.full_name,  # Keep 'name' in API for backward compatibility
+            "name": self.full_name,  # Keep \'name\' in API for backward compatibility
             "full_name": self.full_name,
+            "email": self.parent_email,
             "school": self.school,
-            "grade": self.registered_grade_level,  # Keep 'grade' for backward compatibility
+            "grade": self.registered_grade_level,  # Keep \'grade\' for backward compatibility
             "registered_grade_level": self.registered_grade_level,
             "section": self.section,
             "status": self.status,

@@ -28,7 +28,7 @@ services:
     volumes:
       - ./backend:/app
     environment:
-      - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/tts_bds
+      - DATABASE_URL_DEV=postgresql+psycopg://postgres:postgres@db:5432/tts_bds
     depends_on:
       db:
         condition: service_healthy
