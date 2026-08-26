@@ -24,7 +24,6 @@ function App() {
   const [token, setToken] = useState(null)
   const [query, setQuery] = useState('')
   const [students, setStudents] = useState([])
-  const [queue, setQueue] = useState([])
   const [loading, setLoading] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadResult, setUploadResult] = useState(null)
@@ -74,21 +73,6 @@ function App() {
     }
   }
 
-  const refreshQueue = async () => {
-    if (!token) return
-    try {
-      // For volunteers, the backend automatically uses their assigned grade
-      // For Books Team Lead, we can optionally specify a grade (currently defaulting to Grade 8 for demo)
-      const gradeParam = user?.role === 'volunteer' ? '' : '?grade=Grade%208'
-      const response = await fetchWithAuth(`${API_URL}/students/queue${gradeParam}`)
-      const data = await response.json()
-      setQueue(data.items || [])
-    } catch (error) {
-      console.error('Failed to load queue:', error)
-      setQueue([])
-    }
-  }
-
   useEffect(() => {
     if (!token) return
     const timer = setTimeout(() => {
@@ -96,12 +80,6 @@ function App() {
     }, 150)
     return () => clearTimeout(timer)
   }, [query, token])
-
-  useEffect(() => {
-    if (token) {
-      refreshQueue()
-    }
-  }, [token])
 
   const summary = useMemo(() => {
     return `${students.length} matching student${students.length === 1 ? '' : 's'}`
@@ -112,7 +90,6 @@ function App() {
       method: 'POST',
     })
     refreshStudents(query)
-    refreshQueue()
   }
 
   const handleHandoff = async (studentId) => {
@@ -120,7 +97,6 @@ function App() {
       method: 'POST',
     })
     refreshStudents(query)
-    refreshQueue()
   }
 
   const handleFileUpload = async (event) => {
@@ -140,12 +116,11 @@ function App() {
       })
 
       const result = await response.json()
-      
+
       if (response.ok) {
         setUploadResult(result)
         // Refresh student data
         refreshStudents(query)
-        refreshQueue()
       } else {
         setUploadResult({
           error: true,
@@ -167,10 +142,6 @@ function App() {
   if (!user || !token) {
     return <Login onLoginSuccess={handleLoginSuccess} />
   }
-
-  const queueTitle = user.role === 'volunteer' && user.assigned_grade
-    ? `${user.assigned_grade} Queue`
-    : 'Grade 8 Queue'
 
   return (
     <div className="app-shell">
@@ -289,8 +260,7 @@ function App() {
               <tr>
                 <th>Student ID</th>
                 <th>Name</th>
-                <th>School</th>
-                <th>Grade</th>
+                <th>Email</th>
                 <th>Status</th>
                 <th>Action</th>
               </tr>
@@ -298,20 +268,19 @@ function App() {
             <tbody>
               {students.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="empty-state">
+                  <td colSpan="5" className="empty-state">
                     {query ? 'No matching students found.' : 'Start typing to filter students.'}
                   </td>
                 </tr>
               ) : (
                 students.map((student) => (
                   <tr key={student.id}>
-                    <td>{student.id}</td>
+                    <td>{student.cta_student_id}</td>
                     <td>
                       {student.name}
                       {student.section && <small className="section-badge"> [{student.section}]</small>}
                     </td>
-                    <td>{student.school}</td>
-                    <td>{student.grade}</td>
+                    <td>{student.email}</td>
                     <td>
                       <span className={`status ${STATUS_CLASS[student.status] || 'status-default'}`}>
                         {STATUS_TEXT[student.status] || student.status}
@@ -332,50 +301,11 @@ function App() {
                     </td>
                   </tr>
                 ))
-              )}  
+              )}
             </tbody>
           </table>
           </div>
         </div>
-
-        <aside className="panel queue-card">
-          <div className="panel-header">
-            <h2>{queueTitle}</h2>
-          </div>
-          <div className="scrollable-content">
-            <ul className="queue-list">
-            {queue.length === 0 ? (
-              <li className="empty-state-inline">No students in queue.</li>
-            ) : (
-              queue.map((student) => (
-                <li key={student.id} className="queue-item">
-                  <div>
-                    <strong>
-                      {student.name}
-                      {student.section && <span className="section-badge"> [{student.section}]</span>}
-                    </strong>
-                    <small>{student.id} • {student.school}</small>
-                  </div>
-                  <div className="queue-actions">
-                    <span className={`status ${STATUS_CLASS[student.status] || 'status-default'}`}>
-                      {STATUS_TEXT[student.status] || student.status}
-                    </span>
-                    {student.status === 'READY_FOR_PICKUP' || student.status === 'PENDING_SWAP' ? (
-                      <button type="button" className="action-btn primary btn-sm" onClick={() => handleApprove(student.id)}>
-                        Approve
-                      </button>
-                    ) : student.status === 'APPROVED' ? (
-                      <button type="button" className="action-btn success btn-sm" onClick={() => handleHandoff(student.id)}>
-                        Hand Over
-                      </button>
-                    ) : null}
-                  </div>
-                </li>
-              ))
-            )}
-          </ul>
-          </div>
-        </aside>
       </section>
     </div>
   )

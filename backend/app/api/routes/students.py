@@ -240,6 +240,11 @@ async def upload_students(
             if col in df.columns:
                 col_map['section'] = col
                 break
+        # Map parent email (optional)
+        for col in ['parent_email_id', 'parent_email', 'email']:
+            if col in df.columns:
+                col_map['parent_email'] = col
+                break
         
         # Validate required mappings found
         required_fields = ['cta_student_id', 'full_name', 'registered_grade_level']
@@ -290,6 +295,8 @@ async def upload_students(
                         existing.school = str(row[col_map['school']]).strip()
                     if 'section' in col_map and not pd.isna(row.get(col_map['section'])):
                         existing.section = str(row[col_map['section']]).strip()
+                    if 'parent_email' in col_map and not pd.isna(row.get(col_map['parent_email'])):
+                        existing.parent_email = str(row[col_map['parent_email']]).strip()
                     updated += 1
                 else:
                     # INSERT: create new student
@@ -305,7 +312,10 @@ async def upload_students(
                     section_value = None
                     if 'section' in col_map and not pd.isna(row.get(col_map['section'])):
                         section_value = str(row[col_map['section']]).strip()
-                    
+                    parent_email_value = None
+                    if 'parent_email' in col_map and not pd.isna(row.get(col_map['parent_email'])):
+                        parent_email_value = str(row[col_map['parent_email']]).strip()
+
                     new_student = Student(
                         id=student_id,
                         tts_student_id=next_tts_id,
@@ -314,6 +324,7 @@ async def upload_students(
                         registered_grade_level=str(grade).strip(),
                         school=school_value,
                         section=section_value,
+                        parent_email=parent_email_value,
                         status=StudentStatus.READY_FOR_PICKUP.value,
                     )
                     db.add(new_student)
