@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts the TTS_BDS stack for training/testing via ngrok.
+# Starts the TTS_BDS stack for training/testing via ngrok. and locally
 # - Postgres via Docker Compose
 # - Frontend built (if dist/ missing or --build passed) and served by the backend
 # - Backend run directly on the host (not Docker) so it can serve frontend/dist
