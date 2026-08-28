@@ -1,0 +1,25 @@
+**Installation & Initial Setup**
+
+* Installed the official `ngrok` package on Ubuntu using `apt`.
+* Added your personal authentication token from [dashboard.ngrok.com](https://dashboard.ngrok.com) using `ngrok config add-authtoken`.
+
+**Vite Configuration (`vite.config.js`)**
+
+* Configured Vite to listen on all local network interfaces (`host: true`).
+* Whitelisted Ngrok's incoming domain hosts (`allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app']`) to prevent Vite's security guard from throwing *"Invalid Host Header"* / *"Blocked Host"* errors.
+
+**Background Service Setup (`systemd`)**
+
+* Created a Linux service unit at `/etc/systemd/system/ngrok.service` linked to your system user (`senthil`) and config file path (`/home/senthil/.config/ngrok/ngrok.yml`).
+* Enabled and started the service so Ngrok runs automatically in the background and persists across system reboots.
+
+**Active Public Endpoint**
+
+* **Public URL:** `[https://posting-earthly-hummus.ngrok-free.dev](https://posting-earthly-hummus.ngrok-free.dev)`
+* **Local Tunnel Target:** `http://localhost:5173`
+* **When Ngrok is active in the background, it hosts a local web dashboard at:
+http://localhost:4040
+-----------------------------------------------------------------
+After the above steps, login page displayed. but, login failed, because frontend seems to use localhost in the API calls its making to backend.
+Need to fix this....
+------------------------------------------------------------------

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import './Login.css'
 
 // Empty string means same-origin (used when the backend serves the built frontend in prod)
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+// const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`
 
 function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState('')
