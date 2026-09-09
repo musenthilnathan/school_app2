@@ -7,6 +7,8 @@ Implementation design and app scaffold for the Tamil School Book Distribution Sy
 - React
 - PostgreSQL
 
+For a fresh Mac setup, see [MAC_DEPLOY_INSTRUCTIONS.md](MAC_DEPLOY_INSTRUCTIONS.md).
+
 ## Local runtime
 
 ### Backend

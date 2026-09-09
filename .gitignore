@@ -50,5 +50,7 @@ Thumbs.db
 # Project specific
 sample_upload.csv
 /home/senthil/Downloads/
+backups/
+backend/dbeaver.out
 *.xls
 *.xlsx

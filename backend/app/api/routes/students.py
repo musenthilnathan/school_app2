@@ -153,7 +153,6 @@ def complete_handoff(
     db.refresh(student)
     return {"message": f"Book handed over to {student_id}", "student": student.to_dict()}
 
-
 @router.post("/students/upload")
 async def upload_students(
     file: UploadFile = File(...),
@@ -163,29 +162,35 @@ async def upload_students(
     """
     Upload student roster from CSV or Excel file.
     Performs insert/update sync based on cta_student_id.
-    
+
     Required columns:
     - cta_student_id: unique student ID from CTA
     - full_name: student full name
     - registered_grade_level: e.g., "Grade 6", "Grade 7"
-    
+
     Optional columns:
     - school: school name
     - section: section name (e.g., 'A', 'B', 'Section 1')
+    - parent_email / parent_email_id: parent contact email
+
+    Business rule (per implementation spec, section 7.3):
+    - If a student's grade changes AND they've already had a book handed over,
+      they are flagged PENDING_SWAP instead of silently moving grade, so staff
+      know to verify/reclaim the old book before issuing a new one.
     """
     # Only admin and books_team_lead can upload
     if current_user.role not in [UserRole.ADMIN.value, UserRole.BOOKS_TEAM_LEAD.value]:
         raise HTTPException(status_code=403, detail="Only admin and books team lead can upload students")
-    
+
     # Validate file type
     filename = file.filename.lower()
     if not (filename.endswith('.csv') or filename.endswith('.xlsx') or filename.endswith('.xls')):
         raise HTTPException(status_code=400, detail="File must be CSV or Excel (.csv, .xlsx, .xls)")
-    
+
     try:
         # Read file content
         content = await file.read()
-        
+
         # Parse based on file type
         if filename.endswith('.csv'):
             df = pd.read_csv(BytesIO(content))
@@ -193,59 +198,59 @@ async def upload_students(
             # For Excel/HTML files, try multiple parsers
             try:
                 df = pd.read_excel(BytesIO(content))
-            except:
+            except Exception:
                 # CTA exports .xls as HTML format
                 df = pd.read_html(BytesIO(content))[0]
-        
+
         # Remove completely blank rows
         df = df.dropna(how='all')
-        
+
         # Normalize column names (lowercase, strip spaces)
         df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
-        
+
         # Detect column mappings (flexible naming)
         col_map = {}
-        
+
         # Map cta_student_id
         for col in ['student_id', 'cta_student_id', 'id']:
             if col in df.columns:
                 col_map['cta_student_id'] = col
                 break
-        
+
         # Map full_name (either combined or separate first/last)
         if 'full_name' in df.columns:
             col_map['full_name'] = 'full_name'
         elif 'student_first_name' in df.columns and 'student_last_name' in df.columns:
-            # Combine first and last name
             df['full_name'] = df['student_first_name'].astype(str) + ' ' + df['student_last_name'].astype(str)
             col_map['full_name'] = 'full_name'
         elif 'first_name' in df.columns and 'last_name' in df.columns:
             df['full_name'] = df['first_name'].astype(str) + ' ' + df['last_name'].astype(str)
             col_map['full_name'] = 'full_name'
-        
+
         # Map grade
         for col in ['registered_grade_level', 'grade_level', 'grade', 'grade_name']:
             if col in df.columns:
                 col_map['registered_grade_level'] = col
                 break
-        
+
         # Map school (optional)
         for col in ['school', 'school_name']:
             if col in df.columns:
                 col_map['school'] = col
                 break
-        
+
         # Map section (optional)
         for col in ['section', 'section_name', 'section_no']:
             if col in df.columns:
                 col_map['section'] = col
                 break
+
         # Map parent email (optional)
         for col in ['parent_email_id', 'parent_email', 'email']:
             if col in df.columns:
                 col_map['parent_email'] = col
                 break
-        
+
         # Validate required mappings found
         required_fields = ['cta_student_id', 'full_name', 'registered_grade_level']
         missing_fields = [field for field in required_fields if field not in col_map]
@@ -255,16 +260,19 @@ async def upload_students(
                 status_code=400,
                 detail=f"Could not find required columns. Missing: {', '.join(missing_fields)}. Available columns: {available_cols}"
             )
-        
+
         # Track results
         inserted = 0
         updated = 0
+        pending_swap_count = 0
+        withdrawn_count = 0
+        imported_cta_ids = set()
         errors = []
-        
+
         # Get the current max tts_student_id for generating new IDs
         max_tts_id_result = db.query(Student.tts_student_id).order_by(Student.tts_student_id.desc()).first()
         next_tts_id = (max_tts_id_result[0] + 1) if max_tts_id_result and max_tts_id_result[0] else 1001
-        
+
         # Process each row
         for idx, row in df.iterrows():
             try:
@@ -272,84 +280,153 @@ async def upload_students(
                 cta_id = row[col_map['cta_student_id']]
                 full_name = row[col_map['full_name']]
                 grade = row[col_map['registered_grade_level']]
-                
+
                 if pd.isna(cta_id) or pd.isna(full_name) or pd.isna(grade):
                     errors.append(f"Row {idx + 2}: Missing required field(s)")
                     continue
-                
+
                 # Convert cta_student_id to integer
                 try:
                     cta_id = int(cta_id)
                 except (ValueError, TypeError):
                     errors.append(f"Row {idx + 2}: Invalid cta_student_id '{cta_id}' (must be numeric)")
                     continue
-                
-                # Check if student exists
-                existing = db.query(Student).filter(Student.cta_student_id == cta_id).first()
-                
-                if existing:
-                    # UPDATE: only update name, grade, school, section - preserve status and timestamps
-                    existing.full_name = str(full_name).strip()
-                    existing.registered_grade_level = str(grade).strip()
-                    if 'school' in col_map and not pd.isna(row.get(col_map['school'])):
-                        existing.school = str(row[col_map['school']]).strip()
-                    if 'section' in col_map and not pd.isna(row.get(col_map['section'])):
-                        existing.section = str(row[col_map['section']]).strip()
-                    if 'parent_email' in col_map and not pd.isna(row.get(col_map['parent_email'])):
-                        existing.parent_email = str(row[col_map['parent_email']]).strip()
-                    updated += 1
-                else:
-                    # INSERT: create new student
-                    # Generate ID in TTS-XXXX format
-                    student_id = f"TTS-{next_tts_id}"
-                    
-                    # Get school value
-                    school_value = 'Unknown'
-                    if 'school' in col_map and not pd.isna(row.get(col_map['school'])):
-                        school_value = str(row[col_map['school']]).strip()
-                    
-                    # Get section value (optional)
-                    section_value = None
-                    if 'section' in col_map and not pd.isna(row.get(col_map['section'])):
-                        section_value = str(row[col_map['section']]).strip()
-                    parent_email_value = None
-                    if 'parent_email' in col_map and not pd.isna(row.get(col_map['parent_email'])):
-                        parent_email_value = str(row[col_map['parent_email']]).strip()
 
-                    new_student = Student(
-                        id=student_id,
-                        tts_student_id=next_tts_id,
-                        cta_student_id=cta_id,
-                        full_name=str(full_name).strip(),
-                        registered_grade_level=str(grade).strip(),
-                        school=school_value,
-                        section=section_value,
-                        parent_email=parent_email_value,
-                        status=StudentStatus.READY_FOR_PICKUP.value,
-                    )
-                    db.add(new_student)
-                    inserted += 1
-                    next_tts_id += 1  # Increment for next new student
-                    
+                imported_cta_ids.add(cta_id)
+                new_grade = str(grade).strip()
+                is_new_student = False
+
+                # SAVEPOINT for this row only - so if ANYTHING below fails
+                # (bad data, duplicate constraint, etc.), only THIS row's
+                # changes are undone - not every row already flushed
+                # successfully earlier in this same upload.
+                savepoint = db.begin_nested()
+                try:
+                    # Check if student exists
+                    existing = db.query(Student).filter(Student.cta_student_id == cta_id).first()
+
+                    if existing:
+                        # UPDATE: only update name, grade, school, section, email -
+                        # preserve status/timestamps EXCEPT for the grade-change +
+                        # already-handed-over case, which requires a PENDING_SWAP flag.
+                        existing.full_name = str(full_name).strip()
+
+                        grade_changed = existing.registered_grade_level.strip() != new_grade
+                        already_handed_over = existing.status == StudentStatus.BOOK_HANDED_OVER.value
+
+                        if grade_changed and already_handed_over:
+                            # Per spec 7.3: grade changed after book already picked up ->
+                            # PENDING_SWAP, blocked from new book until verified return.
+                            existing.registered_grade_level = new_grade
+                            existing.status = StudentStatus.PENDING_SWAP.value
+                            existing.pending_swap_flag = True
+                            pending_swap_count += 1
+                        else:
+                            existing.registered_grade_level = new_grade
+
+                        if 'school' in col_map and not pd.isna(row.get(col_map['school'])):
+                            existing.school = str(row[col_map['school']]).strip()
+                        if 'section' in col_map and not pd.isna(row.get(col_map['section'])):
+                            existing.section = str(row[col_map['section']]).strip()
+                        if 'parent_email' in col_map and not pd.isna(row.get(col_map['parent_email'])):
+                            existing.parent_email = str(row[col_map['parent_email']]).strip()
+                    else:
+                        # INSERT: create new student
+                        student_id = f"TTS-{next_tts_id}"
+
+                        school_value = 'Unknown'
+                        if 'school' in col_map and not pd.isna(row.get(col_map['school'])):
+                            school_value = str(row[col_map['school']]).strip()
+
+                        section_value = None
+                        if 'section' in col_map and not pd.isna(row.get(col_map['section'])):
+                            section_value = str(row[col_map['section']]).strip()
+
+                        parent_email_value = None
+                        if 'parent_email' in col_map and not pd.isna(row.get(col_map['parent_email'])):
+                            parent_email_value = str(row[col_map['parent_email']]).strip()
+
+                        new_student = Student(
+                            id=student_id,
+                            tts_student_id=next_tts_id,
+                            cta_student_id=cta_id,
+                            full_name=str(full_name).strip(),
+                            registered_grade_level=new_grade,
+                            school=school_value,
+                            section=section_value,
+                            parent_email=parent_email_value,
+                            status=StudentStatus.READY_FOR_PICKUP.value,
+                        )
+                        db.add(new_student)
+                        is_new_student = True
+                        next_tts_id += 1  # Increment for next new student
+
+                    # Flush within the savepoint - surfaces constraint violations
+                    # (e.g. duplicate cta_student_id within this same file) here,
+                    # so we can roll back just this row instead of the whole batch.
+                    db.flush()
+                    savepoint.commit()  # releases the savepoint, outer txn stays open
+
+                    if is_new_student:
+                        inserted += 1
+                    else:
+                        updated += 1
+
+                except Exception as row_error:
+                    savepoint.rollback()  # undoes only this row's changes
+                    errors.append(f"Row {idx + 2}: {str(row_error)}")
+                    continue
+
             except Exception as e:
                 errors.append(f"Row {idx + 2}: {str(e)}")
                 continue
-        
+
+        # Any current student absent from this upload is treated as withdrawn.
+        # This keeps the roster in sync with the latest external report while
+        # preserving historical data for students already marked inactive.
+        if imported_cta_ids:
+            missing_students = db.query(Student).filter(~Student.cta_student_id.in_(list(imported_cta_ids))).all()
+        else:
+            missing_students = db.query(Student).all()
+
+        for student in missing_students:
+            if student.status in {
+                StudentStatus.WITHDRAWN_INACTIVE.value,
+                StudentStatus.WITHDRAWN_BOOK_NOT_RETURNED.value,
+            }:
+                continue
+
+            if student.status in {
+                StudentStatus.BOOK_HANDED_OVER.value,
+                StudentStatus.CLAIMED.value,
+            }:
+                student.status = StudentStatus.WITHDRAWN_BOOK_NOT_RETURNED.value
+            else:
+                student.status = StudentStatus.WITHDRAWN_INACTIVE.value
+
+            student.pending_swap_flag = False
+            student.is_active = False
+            withdrawn_count += 1
+
         # Commit all changes
         db.commit()
-        
+
         return {
             "message": "Upload completed",
             "summary": {
                 "total_rows": len(df),
                 "inserted": inserted,
                 "updated": updated,
+                "pending_swap_flagged": pending_swap_count,
+                "withdrawn": withdrawn_count,
                 "errors": len(errors),
             },
             "error_details": errors[:50] if errors else [],  # Return first 50 errors
         }
-        
+
     except pd.errors.EmptyDataError:
         raise HTTPException(status_code=400, detail="File is empty")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process file: {str(e)}")

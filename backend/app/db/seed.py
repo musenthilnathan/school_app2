@@ -70,6 +70,7 @@ def seed_students(db: Session) -> None:
     if db.query(Student).count() > 0:
         return
 
-    for item in DEFAULT_STUDENTS:
-        db.add(Student(**item))
-    db.commit()
+#    for item in DEFAULT_STUDENTS:
+#        db.add(Student(**item))
+#    db.commit()
+

@@ -231,6 +231,8 @@ function App() {
                         <p><strong>Total rows:</strong> {uploadResult.summary?.total_rows || 0}</p>
                         <p><strong>Inserted:</strong> {uploadResult.summary?.inserted || 0}</p>
                         <p><strong>Updated:</strong> {uploadResult.summary?.updated || 0}</p>
+                        <p><strong>Unregistered / Withdrawn:</strong> {uploadResult.summary?.withdrawn || 0}</p>
+                        <p><strong>Pending swap flagged:</strong> {uploadResult.summary?.pending_swap_flagged || 0}</p>
                         <p><strong>Errors:</strong> {uploadResult.summary?.errors || 0}</p>
                       </div>
                       {uploadResult.error_details && uploadResult.error_details.length > 0 && (

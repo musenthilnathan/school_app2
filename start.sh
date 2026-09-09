@@ -78,3 +78,6 @@ curl -sf http://localhost:8000/health && echo "" || echo "    Backend health che
 
 echo ""
 echo "==> Done. Local URL: http://localhost:8000"
+
+nohup dbeaver-ce -nosplash > dbeaver.out &
+
