@@ -29,6 +29,8 @@ function App() {
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
+  const [showStatusSummary, setShowStatusSummary] = useState(false)
+  const [statusSummary, setStatusSummary] = useState(null)
   const [uploadResult, setUploadResult] = useState(null)
 
   // Check for existing auth on mount
@@ -100,6 +102,17 @@ function App() {
       method: 'POST',
     })
     refreshStudents(query)
+  }
+
+  const handleStatusSummary = async () => {
+    try {
+      const response = await fetchWithAuth(`${API_URL}/students/status-summary`)
+      if (!response.ok) throw new Error('Failed to load status summary')
+      setStatusSummary(await response.json())
+      setShowStatusSummary(true)
+    } catch (error) {
+      console.error(error)
+    }
   }
 
   const handleFileUpload = async (event) => {
@@ -174,6 +187,9 @@ function App() {
           />
         </label>
         <div className="summary">{loading ? 'Loading...' : summary}</div>
+        <button type="button" onClick={handleStatusSummary} className="action-btn secondary">
+          Status Summary
+        </button>
         {(user.role === 'admin' || user.role === 'books_team_lead') && (
           <button
             onClick={() => setShowUploadModal(true)}
@@ -254,6 +270,25 @@ function App() {
         </div>
       )}
 
+      {showStatusSummary && (
+        <div className="modal-overlay" onClick={() => setShowStatusSummary(false)}>
+          <div className="modal-content" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Status Summary</h2>
+              <button onClick={() => setShowStatusSummary(false)} className="close-btn">×</button>
+            </div>
+            <div className="modal-body">
+              <div className="upload-summary">
+                <p><strong>Total students:</strong> {statusSummary?.total || 0}</p>
+                {Object.entries(STATUS_TEXT).map(([status, label]) => (
+                  <p key={status}><strong>{label}:</strong> {statusSummary?.counts?.[status] || 0}</p>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <section className="panel-grid">
         <div className="panel table-card">
           <div className="panel-header">
@@ -263,29 +298,28 @@ function App() {
             <table>
             <thead>
               <tr>
-                <th>Student ID</th>
                 <th>Name</th>
-                <th>Email</th>
                 <th>Status</th>
                 <th>Action</th>
+                <th>Book Given (Grade)</th>
+                <th>Student ID</th>
+                <th>Email</th>
               </tr>
             </thead>
             <tbody>
               {students.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="empty-state">
+                  <td colSpan="6" className="empty-state">
                     {query ? 'No matching students found.' : 'Start typing to filter students.'}
                   </td>
                 </tr>
               ) : (
                 students.map((student) => (
                   <tr key={student.id}>
-                    <td>{student.cta_student_id}</td>
                     <td>
                       {student.name}
                       {student.section && <small className="section-badge"> [{student.section}]</small>}
                     </td>
-                    <td>{student.email}</td>
                     <td>
                       <span className={`status ${STATUS_CLASS[student.status] || 'status-default'}`}>
                         {STATUS_TEXT[student.status] || student.status}
@@ -304,6 +338,9 @@ function App() {
                         <span className="small-muted">Done</span>
                       )}
                     </td>
+                    <td>{student.book_handed_over_grade || '—'}</td>
+                    <td>{student.cta_student_id}</td>
+                    <td>{student.email}</td>
                   </tr>
                 ))
               )}

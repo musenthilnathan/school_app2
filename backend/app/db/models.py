@@ -82,6 +82,7 @@ class Student(Base):
     # Event timestamps
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     book_handed_over_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    book_handed_over_grade: Mapped[str | None] = mapped_column(String(50), nullable=True)
     
     # Import tracking
     last_uploaded_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -112,6 +113,7 @@ class Student(Base):
             "is_active": self.is_active,
             "approved_at": self.approved_at.isoformat() if self.approved_at else None,
             "book_handed_over_at": self.book_handed_over_at.isoformat() if self.book_handed_over_at else None,
+            "book_handed_over_grade": self.book_handed_over_grade,
         }
 
 

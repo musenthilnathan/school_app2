@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 from typing import Annotated
 from io import BytesIO
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from sqlalchemy import String, or_
+from sqlalchemy import String, func, or_
 from sqlalchemy.orm import Session
 import pandas as pd
 
@@ -12,6 +13,12 @@ from app.db.database import get_db
 from app.db.models import Student, User, UserRole, StudentStatus
 
 router = APIRouter(tags=["students"])
+
+
+def normalize_grade_level(value: object) -> str:
+    grade = str(value).strip()
+    numeric_grade = re.fullmatch(r"(?:grade\s*)?(\d+)(?:\.0+)?", grade, flags=re.IGNORECASE)
+    return f"Grade {numeric_grade.group(1)}" if numeric_grade else grade
 
 
 @router.get("/students")
@@ -63,6 +70,25 @@ def search_students(
     total = query.count()
 
     return {"query": q, "items": [student.to_dict() for student in items], "total": total}
+
+
+@router.get("/students/status-summary")
+def student_status_summary(
+    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+):
+    query = db.query(Student.status, func.count(Student.id)).group_by(Student.status)
+
+    if current_user.role == UserRole.VOLUNTEER.value:
+        if not current_user.assigned_grade:
+            return {"total": 0, "counts": {}}
+        query = query.filter(Student.registered_grade_level == current_user.assigned_grade)
+
+    counts = {status: count for status, count in query.all()}
+    return {
+        "total": sum(counts.values()),
+        "counts": {status.value: counts.get(status.value, 0) for status in StudentStatus},
+    }
 
 
 @router.get("/students/queue")
@@ -149,6 +175,7 @@ def complete_handoff(
 
     student.status = "BOOK_HANDED_OVER"
     student.book_handed_over_at = datetime.now(timezone.utc)
+    student.book_handed_over_grade = student.registered_grade_level
     db.commit()
     db.refresh(student)
     return {"message": f"Book handed over to {student_id}", "student": student.to_dict()}
@@ -293,7 +320,7 @@ async def upload_students(
                     continue
 
                 imported_cta_ids.add(cta_id)
-                new_grade = str(grade).strip()
+                new_grade = normalize_grade_level(grade)
                 is_new_student = False
 
                 # SAVEPOINT for this row only - so if ANYTHING below fails
@@ -311,12 +338,16 @@ async def upload_students(
                         # already-handed-over case, which requires a PENDING_SWAP flag.
                         existing.full_name = str(full_name).strip()
 
-                        grade_changed = existing.registered_grade_level.strip() != new_grade
+                        grade_changed = normalize_grade_level(existing.registered_grade_level) != new_grade
                         already_handed_over = existing.status == StudentStatus.BOOK_HANDED_OVER.value
 
                         if grade_changed and already_handed_over:
                             # Per spec 7.3: grade changed after book already picked up ->
                             # PENDING_SWAP, blocked from new book until verified return.
+                            # Keep the original handed-over grade as the grade the book was issued for.
+                            previous_grade = existing.registered_grade_level.strip()
+                            if existing.book_handed_over_grade is None:
+                                existing.book_handed_over_grade = previous_grade
                             existing.registered_grade_level = new_grade
                             existing.status = StudentStatus.PENDING_SWAP.value
                             existing.pending_swap_flag = True

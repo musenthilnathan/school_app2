@@ -1,6 +1,8 @@
 import io
 
 from conftest import client, as_user
+from app.db.models import Student, StudentStatus
+from conftest import TestingSessionLocal
 
 
 def test_upload_students_csv_success():
@@ -60,6 +62,81 @@ def test_upload_students_update_existing():
     assert students[0]["full_name"] == "Updated Student Name"
     assert students[0]["registered_grade_level"] == "Grade 7"
     assert students[0]["school"] == "New School"
+
+
+def test_upload_same_grade_after_handoff_does_not_flag_pending_swap():
+    initial_csv = """cta_student_id,full_name,registered_grade_level,school
+9040,Same Grade Student,Grade 6,School One
+"""
+    with as_user("admin"):
+        client.post("/students/upload", files={"file": ("initial.csv", io.BytesIO(initial_csv.encode()), "text/csv")})
+
+    db = TestingSessionLocal()
+    try:
+        student = db.query(Student).filter(Student.cta_student_id == 9040).one()
+        student.status = StudentStatus.BOOK_HANDED_OVER.value
+        student.book_handed_over_grade = "Grade 6"
+        db.commit()
+    finally:
+        db.close()
+
+    equivalent_grade_csv = """cta_student_id,full_name,registered_grade_level,school
+9040,Same Grade Student,6.0,School One
+"""
+    with as_user("admin"):
+        response = client.post(
+            "/students/upload",
+            files={"file": ("equivalent.csv", io.BytesIO(equivalent_grade_csv.encode()), "text/csv")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["pending_swap_flagged"] == 0
+
+    db = TestingSessionLocal()
+    try:
+        student = db.query(Student).filter(Student.cta_student_id == 9040).one()
+        assert student.status == StudentStatus.BOOK_HANDED_OVER.value
+        assert student.registered_grade_level == "Grade 6"
+    finally:
+        db.close()
+
+
+def test_upload_changed_grade_after_handoff_flags_pending_swap():
+    initial_csv = """cta_student_id,full_name,registered_grade_level,school
+9041,Changed Grade Student,Grade 6,School One
+"""
+    with as_user("admin"):
+        client.post("/students/upload", files={"file": ("initial.csv", io.BytesIO(initial_csv.encode()), "text/csv")})
+
+    db = TestingSessionLocal()
+    try:
+        student = db.query(Student).filter(Student.cta_student_id == 9041).one()
+        student.status = StudentStatus.BOOK_HANDED_OVER.value
+        student.book_handed_over_grade = "Grade 6"
+        db.commit()
+    finally:
+        db.close()
+
+    changed_grade_csv = """cta_student_id,full_name,registered_grade_level,school
+9041,Changed Grade Student,Grade 7,School One
+"""
+    with as_user("admin"):
+        response = client.post(
+            "/students/upload",
+            files={"file": ("changed.csv", io.BytesIO(changed_grade_csv.encode()), "text/csv")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["pending_swap_flagged"] == 1
+
+    db = TestingSessionLocal()
+    try:
+        student = db.query(Student).filter(Student.cta_student_id == 9041).one()
+        assert student.status == StudentStatus.PENDING_SWAP.value
+        assert student.registered_grade_level == "Grade 7"
+        assert student.book_handed_over_grade == "Grade 6"
+    finally:
+        db.close()
 
 
 def test_upload_students_missing_columns():
