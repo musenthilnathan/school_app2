@@ -142,7 +142,7 @@ def approve_student(
                 detail=f"You can only approve students in {current_user.assigned_grade}",
             )
     
-    if student.status not in {"READY_FOR_PICKUP", "PENDING_SWAP"}:
+    if student.status != StudentStatus.READY_FOR_PICKUP.value:
         raise HTTPException(status_code=400, detail=f"Student {student_id} is not eligible for approval")
 
     student.status = "APPROVED"
@@ -179,6 +179,35 @@ def complete_handoff(
     db.commit()
     db.refresh(student)
     return {"message": f"Book handed over to {student_id}", "student": student.to_dict()}
+
+
+@router.post("/students/return")
+def accept_book_return(
+    student_id: str,
+    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+):
+    student = db.get(Student, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail=f"Student {student_id} not found")
+
+    if current_user.role not in [UserRole.ADMIN.value, UserRole.BOOKS_TEAM_LEAD.value]:
+        raise HTTPException(status_code=403, detail="Only admin or books team lead can accept returns")
+
+    if student.status == StudentStatus.PENDING_SWAP.value:
+        next_status = StudentStatus.READY_FOR_PICKUP.value
+    elif student.status == StudentStatus.WITHDRAWN_BOOK_NOT_RETURNED.value:
+        next_status = StudentStatus.WITHDRAWN_INACTIVE.value
+    else:
+        raise HTTPException(status_code=400, detail=f"Student {student_id} has no book pending return")
+
+    student.status = next_status
+    student.pending_swap_flag = False
+    student.book_returned_at = datetime.now(timezone.utc)
+    student.book_handed_over_grade = None
+    db.commit()
+    db.refresh(student)
+    return {"message": f"Book return accepted for {student_id}", "student": student.to_dict()}
 
 @router.post("/students/upload")
 async def upload_students(

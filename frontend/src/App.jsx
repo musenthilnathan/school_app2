@@ -20,6 +20,8 @@ const STATUS_TEXT = {
   APPROVED: 'Approved',
   BOOK_HANDED_OVER: 'Handed Over',
   PENDING_SWAP: 'Pending Swap',
+  WITHDRAWN_INACTIVE: 'Withdrawn (Book Not Issued)',
+  WITHDRAWN_BOOK_NOT_RETURNED: 'Withdrawn (Book Not Returned)',
 }
 
 function App() {
@@ -101,6 +103,16 @@ function App() {
     await fetchWithAuth(`${API_URL}/students/handoff?student_id=${encodeURIComponent(studentId)}`, {
       method: 'POST',
     })
+    refreshStudents(query)
+  }
+
+  const handleReturn = async (studentId) => {
+    const response = await fetchWithAuth(`${API_URL}/students/return?student_id=${encodeURIComponent(studentId)}`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      console.error('Failed to accept book return')
+    }
     refreshStudents(query)
   }
 
@@ -326,7 +338,11 @@ function App() {
                       </span>
                     </td>
                     <td>
-                      {student.status === 'READY_FOR_PICKUP' || student.status === 'PENDING_SWAP' ? (
+                      {user.role !== 'volunteer' && (student.status === 'PENDING_SWAP' || student.status === 'WITHDRAWN_BOOK_NOT_RETURNED') ? (
+                        <button type="button" className="action-btn warning" onClick={() => handleReturn(student.id)}>
+                          Return
+                        </button>
+                      ) : student.status === 'READY_FOR_PICKUP' ? (
                         <button type="button" className="action-btn primary" onClick={() => handleApprove(student.id)}>
                           Approve
                         </button>

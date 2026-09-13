@@ -139,6 +139,66 @@ def test_upload_changed_grade_after_handoff_flags_pending_swap():
         db.close()
 
 
+def test_accept_return_for_pending_swap_resets_student_for_pickup():
+    csv_content = """cta_student_id,full_name,registered_grade_level,school
+9042,Return Student,Grade 7,School One
+"""
+    with as_user("admin"):
+        response = client.post("/students/upload", files={"file": ("student.csv", io.BytesIO(csv_content.encode()), "text/csv")})
+    assert response.status_code == 200
+
+    db = TestingSessionLocal()
+    try:
+        student = db.query(Student).filter(Student.cta_student_id == 9042).one()
+        student.status = StudentStatus.PENDING_SWAP.value
+        student.pending_swap_flag = True
+        student.book_handed_over_grade = "Grade 6"
+        db.commit()
+        student_id = student.id
+    finally:
+        db.close()
+
+    with as_user("admin"):
+        response = client.post(f"/students/return?student_id={student_id}")
+
+    assert response.status_code == 200
+    returned_student = response.json()["student"]
+    assert returned_student["status"] == StudentStatus.READY_FOR_PICKUP.value
+    assert returned_student["pending_swap_flag"] is False
+    assert returned_student["book_handed_over_grade"] is None
+    assert returned_student["book_returned_at"] is not None
+
+
+def test_accept_return_for_withdrawn_issued_book_keeps_student_withdrawn():
+    csv_content = """cta_student_id,full_name,registered_grade_level,school
+9043,Withdrawn Student,Grade 7,School One
+"""
+    with as_user("admin"):
+        response = client.post("/students/upload", files={"file": ("student.csv", io.BytesIO(csv_content.encode()), "text/csv")})
+    assert response.status_code == 200
+
+    db = TestingSessionLocal()
+    try:
+        student = db.query(Student).filter(Student.cta_student_id == 9043).one()
+        student.status = StudentStatus.WITHDRAWN_BOOK_NOT_RETURNED.value
+        student.is_active = False
+        student.book_handed_over_grade = "Grade 7"
+        db.commit()
+        student_id = student.id
+    finally:
+        db.close()
+
+    with as_user("admin"):
+        response = client.post(f"/students/return?student_id={student_id}")
+
+    assert response.status_code == 200
+    returned_student = response.json()["student"]
+    assert returned_student["status"] == StudentStatus.WITHDRAWN_INACTIVE.value
+    assert returned_student["is_active"] is False
+    assert returned_student["book_handed_over_grade"] is None
+    assert returned_student["book_returned_at"] is not None
+
+
 def test_upload_students_missing_columns():
     """Test CSV upload with missing required columns."""
     csv_content = """cta_student_id,full_name
