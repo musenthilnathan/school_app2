@@ -1,0 +1,65 @@
+.view-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.view-tabs button {
+  padding: 8px 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: white;
+  color: #0f172a;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.view-tabs button.active {
+  background: #0f172a;
+  color: white;
+  border-color: #0f172a;
+}
+
+.inv-grade select {
+  min-width: 160px;
+}
+
+.inv-cards {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.inv-card {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 18px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.inv-card span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.inv-card strong {
+  font-size: 1.6rem;
+  color: #0f172a;
+}
+
+.inv-num {
+  width: 80px;
+  padding: 4px 8px;
+}
+
+.inv-error {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fee2e2;
+  color: #991b1b;
+}

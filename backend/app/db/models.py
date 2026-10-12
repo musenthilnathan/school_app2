@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -202,3 +202,24 @@ class Inventory(Base):
         """Update the projected_available_inventory field."""
         self.projected_available_inventory = self.calculate_projected_inventory()
 
+
+class BookInventory(Base):
+    """Per-grade, per-category book counts (loaded from the inventory worksheet)."""
+
+    __tablename__ = "book_inventories"
+    __table_args__ = (UniqueConstraint("grade_level", "category"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    grade_level: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(255), nullable=False)
+    complete_set_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    extra_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "grade_level": self.grade_level,
+            "category": self.category,
+            "complete_set_count": self.complete_set_count,
+            "extra_count": self.extra_count,
+        }

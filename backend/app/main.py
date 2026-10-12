@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes.auth import router as auth_router
+from app.api.routes.book_inventories import router as book_inventories_router
 from app.api.routes.books import router as books_router
 from app.api.routes.health import router as health_router
 from app.api.routes.inventory import router as inventory_router
@@ -51,6 +52,7 @@ app.include_router(auth_router)
 app.include_router(students_router)
 app.include_router(books_router)
 app.include_router(inventory_router)
+app.include_router(book_inventories_router)
 
 # Serve the built frontend (frontend/dist) so a single process can run in prod.
 # Mounted last so it only catches requests the API routers above didn't match.

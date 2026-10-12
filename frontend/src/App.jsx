@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import Login from './Login'
+import BookInventories from './BookInventories'
 
 // Empty string means same-origin (used when the backend serves the built frontend in prod)
 // Empty string means same-origin (used when the backend serves the built frontend in prod)
@@ -34,6 +35,7 @@ function App() {
   const [showStatusSummary, setShowStatusSummary] = useState(false)
   const [statusSummary, setStatusSummary] = useState(null)
   const [uploadResult, setUploadResult] = useState(null)
+  const [view, setView] = useState('students') // 'students' | 'inventory'
 
   // Check for existing auth on mount
   useEffect(() => {
@@ -186,6 +188,19 @@ function App() {
         </div>
       </header>
 
+      <nav className="view-tabs">
+        <button type="button" className={view === 'students' ? 'active' : ''} onClick={() => setView('students')}>
+          Students
+        </button>
+        <button type="button" className={view === 'inventory' ? 'active' : ''} onClick={() => setView('inventory')}>
+          Book Inventory
+        </button>
+      </nav>
+
+      {view === 'inventory' && <BookInventories apiUrl={API_URL} token={token} user={user} />}
+
+      {view === 'students' && (
+        <>
       <section className="toolbar">
         <label className="search-box" htmlFor="student-search">
           <span>Search students</span>
@@ -365,6 +380,8 @@ function App() {
           </div>
         </div>
       </section>
+        </>
+      )}
     </div>
   )
 }

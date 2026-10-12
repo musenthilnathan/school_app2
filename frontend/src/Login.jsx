@@ -85,9 +85,9 @@ function Login({ onLoginSuccess }) {
         <div className="login-help">
           <p>Demo accounts:</p>
           <ul>
-            <li><strong>admin</strong> / admin123</li>
-            <li><strong>books_lead</strong> / books123</li>
-            <li><strong>volunteer_g8</strong> / vol123 (Grade 8)</li>
+            <li><strong>admin</strong> / *******</li>
+            <li><strong>books_lead</strong> / *******</li>
+            <li><strong>volunteer_g8</strong> / ******* (Grade 8)</li>
           </ul>
         </div>
       </div>
