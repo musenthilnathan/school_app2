@@ -10,7 +10,7 @@ import pandas as pd
 
 from app.core.deps import get_current_user
 from app.db.database import get_db
-from app.db.models import Student, User, UserRole, StudentStatus
+from app.db.models import BookInventory, Student, User, UserRole, StudentStatus
 
 router = APIRouter(tags=["students"])
 
@@ -19,6 +19,38 @@ def normalize_grade_level(value: object) -> str:
     grade = str(value).strip()
     numeric_grade = re.fullmatch(r"(?:grade\s*)?(\d+)(?:\.0+)?", grade, flags=re.IGNORECASE)
     return f"Grade {numeric_grade.group(1)}" if numeric_grade else grade
+
+
+def adjust_grade_inventory(db: Session, grade: object, delta: int) -> None:
+    """Add `delta` complete sets to every inventory category of the given grade.
+
+    Called from the handoff / return endpoints so the book_inventories table
+    stays in step with student actions. The change is flushed with the caller's
+    transaction, so it commits (or rolls back) together with the student update.
+
+    - Grades with no inventory rows are not tracked, so nothing changes.
+    - Inventory can never fall below zero: a decrease that would do so raises
+      409 and nothing is changed.
+    """
+    target = normalize_grade_level(grade)
+    rows = [
+        row
+        for row in db.query(BookInventory).with_for_update().all()
+        if normalize_grade_level(row.grade_level) == target
+    ]
+    if not rows:
+        return
+
+    if delta < 0:
+        short = [row.category for row in rows if row.complete_set_count + delta < 0]
+        if short:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Not enough inventory for {target}: out of stock for {', '.join(short)}",
+            )
+
+    for row in rows:
+        row.complete_set_count += delta
 
 
 @router.get("/students")
@@ -173,6 +205,9 @@ def complete_handoff(
     if student.status != "APPROVED":
         raise HTTPException(status_code=400, detail=f"Student {student_id} is not approved for handoff")
 
+    # Handover: one set leaves stock for the student's grade.
+    adjust_grade_inventory(db, student.registered_grade_level, -1)
+
     student.status = "BOOK_HANDED_OVER"
     student.book_handed_over_at = datetime.now(timezone.utc)
     student.book_handed_over_grade = student.registered_grade_level
@@ -200,6 +235,12 @@ def accept_book_return(
         next_status = StudentStatus.WITHDRAWN_INACTIVE.value
     else:
         raise HTTPException(status_code=400, detail=f"Student {student_id} has no book pending return")
+
+    # Return: the set comes back into stock for the grade it was issued for.
+    # For a swap (PENDING_SWAP) that is the student's current/old grade; the
+    # upgrade grade is reduced later, when the new book is handed over.
+    returned_grade = student.book_handed_over_grade or student.registered_grade_level
+    adjust_grade_inventory(db, returned_grade, +1)
 
     student.status = next_status
     student.pending_swap_flag = False
