@@ -35,6 +35,7 @@ if [[ "${1:-}" == "--yes" ]]; then
   python3 - <<'PYEOF'
 from app.db.database import Base, engine
 from app.db.seed import seed_students
+from app.db.seed_book_inventories import seed_book_inventories
 from app.db.seed_books import seed_books, seed_inventories
 from app.db.seed_users import seed_users
 from sqlalchemy.orm import sessionmaker
@@ -50,6 +51,7 @@ try:
     seed_users(db)
     seed_books(db)
     seed_inventories(db)
+    seed_book_inventories(db)
     seed_students(db)
     print("Done.")
 finally:

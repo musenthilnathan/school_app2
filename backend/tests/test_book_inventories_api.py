@@ -42,3 +42,30 @@ def test_update_requires_lead_or_admin():
         assert res.json()["extra_count"] == 5
         assert client.patch(f"/book-inventories/{item_id}", json={"extra_count": -1}).status_code == 422
         assert client.patch("/book-inventories/999999", json={"extra_count": 1}).status_code == 404
+
+
+def test_seed_creates_table_and_loads_rows_once():
+    """A fresh database gets the table and the 48 worksheet rows; reseeding changes nothing."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.db.database import Base
+    from app.db.seed_book_inventories import DEFAULT_BOOK_INVENTORIES, seed_book_inventories
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)  # what happens at app startup
+    db = sessionmaker(bind=engine)()
+    try:
+        seed_book_inventories(db)
+        assert db.query(BookInventory).count() == len(DEFAULT_BOOK_INVENTORIES) == 48
+
+        first = db.query(BookInventory).order_by(BookInventory.id).first()
+        first.extra_count = 99
+        db.commit()
+
+        seed_book_inventories(db)  # second run must not duplicate or overwrite
+        assert db.query(BookInventory).count() == 48
+        assert db.query(BookInventory).order_by(BookInventory.id).first().extra_count == 99
+    finally:
+        db.close()
